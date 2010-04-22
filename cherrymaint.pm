@@ -5,8 +5,9 @@ use HTML::Entities;
 my $BLEADGITHOME = config->{gitroot};
 my $STARTPOINT = config->{startpoint};
 my $ENDPOINT = config->{endpoint};
+my $TARGET = config->{target};
 my $GIT = "/usr/bin/git";
-$ENV{GIT_NOTES_REF} = "refs/notes/cherrymaint/$ENDPOINT";
+$ENV{GIT_NOTES_REF} = "refs/notes/cherrymaint/$TARGET";
 
 chdir $BLEADGITHOME or die "Can't chdir to $BLEADGITHOME: $!\n";
 

@@ -11,8 +11,11 @@ what it does
 
 Each commit between two chosen points in the master branch can be
 associated to a status: Unexamined, Rejected, Requested, Seconded,
-Approved, and Cherry-picked. The statuses are currently saved in a flat
-file, which is not very scalable.
+Approved, and Cherry-picked.
+
+These notes are relevant to a specific *target* maintenance branch,
+and the information is stored on a per-target git notes tree.
+
 
 what it doesn't do
 ------------------
