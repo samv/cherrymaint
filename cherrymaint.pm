@@ -6,29 +6,34 @@ my $BLEADGITHOME = config->{gitroot};
 my $STARTPOINT = config->{startpoint};
 my $ENDPOINT = config->{endpoint};
 my $GIT = "/usr/bin/git";
-my $DATAFILE = "$ENV{HOME}/cherrymaint.db";
+$ENV{GIT_NOTES_REF} = "refs/notes/cherrymaint/$ENDPOINT";
 
 chdir $BLEADGITHOME or die "Can't chdir to $BLEADGITHOME: $!\n";
 
+our %filecache;
+sub read_blob_sha1 {
+	my $sha1 = shift;
+	return $filecache{$sha1} if exists $filecache{$sha1};
+	$filecache{$sha1} = qx($GIT cat-file blob $sha1);
+}
+
 sub load_datafile {
     my $data = {};
-    open my $fh, '<', $DATAFILE or die $!;
+    open my $fh, '-|', $GIT, qw(ls-tree -r), $ENV{GIT_NOTES_REF} or die $!;
     while (<$fh>) {
-        chomp;
-        my ($commit, $value) = split / /;
-        $data->{$commit} = 0 + $value;
+        my ($mode, $type, $sha1, $filename) = split / /;
+	(my $commit = $filename) =~ s{/}{}g;
+        $data->{$commit} = 0 + read_sha1($sha1);
     }
     close $fh;
     return $data;
 }
 
-sub save_datafile {
-    my ($data) = @_;
-    open my $fh, '>', $DATAFILE or die $!;
-    for my $k (keys %$data) {
-        print $fh "$k $data->{$k}\n" if $data->{$k};
-    }
-    close $fh;
+sub set_commit_state {
+    my $commit = shift;
+    my $state = shift;
+    system($GIT, qw(notes -m $state -f), $commit) == 0
+	 or die "git notes failed; $!";
 }
 
 get '/' => sub {
@@ -55,8 +60,7 @@ get '/mark' => sub {
     $commit =~ /^[0-9a-f]+$/ or die;
     $value =~ /^[0-9]$/ or die;
     my $data = load_datafile;
-    $data->{$commit} = $value;
-    save_datafile($data);
+    set_commit_state($commit, $value);
 };
 
 true;
