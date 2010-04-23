@@ -11,24 +11,33 @@ my $remote = config->{remote} || "origin";
 my $GIT = $cherrymaint::GIT;
 my $target = config->{target};
 
-my $notes_ref = $ENV{GIT_NOTES_REF};
+my $notes_ref = $cherrymaint::NOTES_REF;
 my $tracking_ref = "refs/remotes/$remote/notes/cherrymaint/$target";
 
 my $fetch_line = "$notes_ref:$tracking_ref";
 
-my @fetch_lines=qx($GIT config --get-all remote.$remote.fetch);
-unless ( grep { m{^\+?\Q$fetch_line\E$} } @fetch_lines ) {
-	system($GIT, "config", "--add", "remote.$remote.fetch",
-	       "+$fetch_line");
-}
-
 # fetch the latest
-system($GIT, "fetch", $remote) == 0
-	or die;
+system($GIT, "fetch", $remote, "+$fetch_line");
 
 # check for changes on either side
-my @remote_changes = qx($GIT rev-list $notes_ref..$tracking_ref);
-my @local_changes = qx($GIT rev-list $tracking_ref..$notes_ref);
+my $remote_ref = qx($GIT rev-parse --verify $tracking_ref);
+my @remote_changes;
+my @local_changes;
+my $plus = "";
+if ( !$remote_ref ) {
+	print "No-one has pushed to $notes_ref remotely yet\n";
+	$plus = "+";
+	@local_changes = qx($GIT rev-list $notes_ref);
+}
+else {
+	my @fetch_lines=qx($GIT config --get-all remote.$remote.fetch);
+	unless ( grep { m{^\+?\Q$fetch_line\E$} } @fetch_lines ) {
+		system($GIT, "config", "--add", "remote.$remote.fetch",
+		       "+$fetch_line");
+	}
+	@remote_changes = qx($GIT rev-list $notes_ref..$tracking_ref);
+	@local_changes = qx($GIT rev-list $tracking_ref..$notes_ref);
+}
 
 # ...and act accordingly
 if ( @remote_changes ) {
@@ -45,13 +54,13 @@ if ( @remote_changes ) {
 
 # share our (possibly merged) changes
 if ( @local_changes ) {
-	system($GIT, "push", $remote, $notes_ref) == 0
+	system($GIT, "push", $remote, "$plus$notes_ref") == 0
 		or die;
 }
 
 exit(0);
 
-sub display {
+sub _display {
 	my $sha1 = shift;
 	if ( defined $sha1 ) {
 		my $value = cherrymaint::read_blob_sha1($sha1);
@@ -77,7 +86,8 @@ sub do_merge {
 	local($ENV{GIT_INDEX_FILE}) = ( -d ".git" ? ".git/" : "" )
 		. "/cherrymaint.idx";
 	unlink($ENV{GIT_INDEX_FILE});
-	system($GIT, "read-tree", "-m", "$merge_base^{tree}",
+	system($GIT, "read-tree", "-m",
+	       ($merge_base ? ("$merge_base^{tree}") : ()),
 	       "$notes_ref^{tree}", "$tracking_ref^{tree}");
 
 	# check for 'unmerged' entries, ie entries which didn't change
@@ -98,7 +108,7 @@ sub do_merge {
 		for my $filename ( keys %stages ) {
 			my ($commit, $who) =
 				qx($GIT rev-list --pretty=format:%aN -1 $merge_base..$tracking_ref -- "$filename");
-			chomp($who);
+			chomp($who) if defined $who;
 			$who{$filename} = $who;
 		}
 
@@ -112,10 +122,20 @@ sub do_merge {
 			my $local = $stages{$filename}[2];
 			my $remote = $stages{$filename}[3];
 
-			print "Your side changed from "._display($orig)
-				." to "._display($local)."\n";
-			print "$who{$filename} last changed"
-				." to "._display($remote)."\n";
+			if ( $merge_base ) {
+				print "Your side changed from "._display($orig)
+					." to "._display($local)."\n";
+			}
+			else {
+				print "Your side has "._display($local)."\n";
+			}
+			if ( $who{$filename} ) {
+				print "$who{$filename} last set"
+					." to "._display($remote)."\n";
+			}
+			else {
+				print "unchanged from "._display($remote)." remotely\n";
+			}
 
 			my $answer = "kittens";
 			while ( $answer !~ /^[lr]$/i ) {
@@ -125,19 +145,21 @@ sub do_merge {
 				chomp($answer);
 			}
 			my $winner;
-			if ( $answer =~ /l/ ) {
+			if ( $answer =~ /l/i ) {
 				$winner = $local;
 			}
 			else {
 				$winner = $remote;
 			}
 			if ( defined $winner ) {
-				run($GIT, "update-index", $filename,
-				    $winner);
+				system($GIT, "update-index", "--add",
+				       "--cacheinfo", "100644",
+				       $filename, $winner);
 				print "Setting to "._display($winner)."\n";
 			}
 			else {
-				run($GIT, qw(rm --cached), $filename);
+				system($GIT, qw(rm --cached),
+				       $filename);
 				print "Clearing record\n";
 			}
 		}
@@ -150,7 +172,7 @@ sub do_merge {
 	unlink($ENV{GIT_INDEX_FILE});
 
 	my $msg = "merged using cherrymaint-swap";
-	my $commit = qx(echo $msg | $GIT commit-tree);
+	my $commit = qx(echo $msg | $GIT commit-tree $tree -p $notes_ref -p $tracking_ref);
 	die if $?;
 	chomp($commit);
 	system($GIT, "update-ref", "-m", $msg, $notes_ref, $commit);
