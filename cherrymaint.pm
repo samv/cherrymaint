@@ -6,8 +6,8 @@ my $BLEADGITHOME = config->{gitroot};
 my $STARTPOINT = config->{startpoint};
 my $ENDPOINT = config->{endpoint};
 my $TARGET = config->{target};
-our $GIT = "/usr/bin/git";
-$ENV{GIT_NOTES_REF} = "refs/notes/cherrymaint/$TARGET";
+our $GIT = config->{git} || "/usr/bin/git";
+our $NOTES_REF = "refs/notes/cherrymaint/$TARGET";
 
 our @states = qw( Unexamined Rejected Requested Seconded Approved
 		  Cherry-picked );
@@ -23,11 +23,12 @@ sub read_blob_sha1 {
 
 sub load_datafile {
     my $data = {};
-    open my $fh, '-|', $GIT, qw(ls-tree -r), $ENV{GIT_NOTES_REF} or die $!;
+    open my $fh, '-|', $GIT, qw(ls-tree -r), $NOTES_REF or die $!;
     while (<$fh>) {
-        my ($mode, $type, $sha1, $filename) = split / /;
+        my ($mode, $type, $sha1, $filename) = split /\s+/;
 	(my $commit = $filename) =~ s{/}{}g;
-        $data->{$commit} = 0 + read_sha1($sha1);
+	chomp($commit);
+        $data->{substr($commit,0,7)} = 0 + read_blob_sha1($sha1);
     }
     close $fh;
     return $data;
@@ -36,8 +37,8 @@ sub load_datafile {
 sub set_commit_state {
     my $commit = shift;
     my $state = shift;
-    system($GIT, qw(notes -m $state -f), $commit) == 0
-	 or die "git notes failed; $!";
+    $ENV{GIT_NOTES_REF} = $NOTES_REF;
+    system($GIT, qw(notes add), -m => $state, "-f", $commit);
 }
 
 get '/' => sub {
@@ -56,15 +57,6 @@ get '/' => sub {
         };
     }
     template 'index', { commits => \@commits };
-};
-
-get '/mark' => sub {
-    my $commit = params->{commit};
-    my $value = params->{value};
-    $commit =~ /^[0-9a-f]+$/ or die;
-    $value =~ /^[0-9]$/ or die;
-    my $data = load_datafile;
-    set_commit_state($commit, $value);
 };
 
 get '/mark' => sub {
