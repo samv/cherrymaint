@@ -6,8 +6,11 @@ my $BLEADGITHOME = config->{gitroot};
 my $STARTPOINT = config->{startpoint};
 my $ENDPOINT = config->{endpoint};
 my $TARGET = config->{target};
-my $GIT = "/usr/bin/git";
+our $GIT = "/usr/bin/git";
 $ENV{GIT_NOTES_REF} = "refs/notes/cherrymaint/$TARGET";
+
+our @states = qw( Unexamined Rejected Requested Seconded Approved
+		  Cherry-picked );
 
 chdir $BLEADGITHOME or die "Can't chdir to $BLEADGITHOME: $!\n";
 
@@ -53,6 +56,15 @@ get '/' => sub {
         };
     }
     template 'index', { commits => \@commits };
+};
+
+get '/mark' => sub {
+    my $commit = params->{commit};
+    my $value = params->{value};
+    $commit =~ /^[0-9a-f]+$/ or die;
+    $value =~ /^[0-9]$/ or die;
+    my $data = load_datafile;
+    set_commit_state($commit, $value);
 };
 
 get '/mark' => sub {
